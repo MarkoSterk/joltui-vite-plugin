@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, watch as watchDirectory } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { glob } from "tinyglobby";
 import ts from "typescript";
@@ -124,6 +124,12 @@ export default function joltui(options = {}) {
     let pages = [];
     let signature = "";
     let scanPromise = null;
+    let scannedFiles = [];
+    let buildWatch = false;
+    let sourceWatcher = null;
+    let watchSentinel = "";
+    let sentinelTimer = null;
+    let sentinelGeneration = 0;
     const frameworkPackage = options.frameworkPackage ?? "joltui";
     const isSourceFile = (file) => {
         const cleanFile = normalizePath(file.split("?", 1)[0] ?? file);
@@ -154,6 +160,7 @@ export default function joltui(options = {}) {
             paths.set(page.routePath, page);
         }
         pages = found;
+        scannedFiles = files.map(file => path.resolve(file));
         signature = found.map(page => `${normalizePath(page.file)}:${page.className}:${page.routePath ?? "?"}`).join("|");
     };
     const ensureScan = () => {
@@ -171,6 +178,28 @@ export default function joltui(options = {}) {
         server.ws.send({ type: "full-reload" });
         return true;
     };
+    const startBuildWatcher = async () => {
+        if (sourceWatcher)
+            return;
+        watchSentinel = path.join(config.cacheDir, "joltui-pages.watch");
+        await mkdir(path.dirname(watchSentinel), { recursive: true });
+        if (!existsSync(watchSentinel))
+            await writeFile(watchSentinel, "0");
+        sourceWatcher = watchDirectory(sourceRoot, { recursive: true }, (_eventType, filename) => {
+            if (!filename)
+                return;
+            const changedFile = path.resolve(sourceRoot, filename.toString());
+            if (!isSourceFile(changedFile))
+                return;
+            if (sentinelTimer)
+                clearTimeout(sentinelTimer);
+            sentinelTimer = setTimeout(() => {
+                sentinelTimer = null;
+                sentinelGeneration += 1;
+                void writeFile(watchSentinel, String(sentinelGeneration));
+            }, 50);
+        });
+    };
     return {
         name: "joltui-page-discovery",
         enforce: "pre",
@@ -182,6 +211,7 @@ export default function joltui(options = {}) {
             sourceRoot = !options.root && !existsSync(configuredRoot)
                 ? config.root
                 : configuredRoot;
+            buildWatch = config.command === "build" && config.build.watch != null;
             const entries = typeof options.entry === "string"
                 ? [options.entry]
                 : options.entry ?? ["main.ts", "main.tsx", "main.js"];
@@ -190,6 +220,27 @@ export default function joltui(options = {}) {
         async buildStart() {
             try {
                 await ensureScan();
+                if (buildWatch) {
+                    await startBuildWatcher();
+                    this.addWatchFile(watchSentinel);
+                    // Existing candidate files cover decorator changes. Watching
+                    // their directories (and the source root) also detects files
+                    // that do not exist in Rollup's module graph yet.
+                    const watchedDirectories = new Set([sourceRoot]);
+                    for (const file of scannedFiles) {
+                        this.addWatchFile(file);
+                        let directory = path.dirname(file);
+                        while (directory.startsWith(sourceRoot)) {
+                            watchedDirectories.add(directory);
+                            if (directory === sourceRoot)
+                                break;
+                            directory = path.dirname(directory);
+                        }
+                    }
+                    for (const directory of watchedDirectories) {
+                        this.addWatchFile(directory);
+                    }
+                }
                 if (pages.length === 0) {
                     this.error(`No JoltUI pages were discovered under '${normalizePath(sourceRoot)}'.`);
                 }
@@ -207,7 +258,13 @@ export default function joltui(options = {}) {
             await ensureScan();
             return createVirtualModule(pages, frameworkPackage);
         },
-        transform(code, id) {
+        shouldTransformCachedModule({ id }) {
+            return buildWatch && id === resolvedVirtualPagesModuleId;
+        },
+        async transform(code, id) {
+            if (id === resolvedVirtualPagesModuleId && buildWatch) {
+                return { code: createVirtualModule(pages, frameworkPackage), map: null };
+            }
             const cleanId = normalizePath(id.split("?", 1)[0] ?? id);
             if (!entryFiles.has(cleanId) || code.includes(virtualPagesModuleId))
                 return null;
@@ -228,6 +285,13 @@ export default function joltui(options = {}) {
             if (!isSourceFile(context.file))
                 return;
             return await refresh(context.server) ? [] : undefined;
+        },
+        closeWatcher() {
+            if (sentinelTimer)
+                clearTimeout(sentinelTimer);
+            sentinelTimer = null;
+            sourceWatcher?.close();
+            sourceWatcher = null;
         },
     };
 }

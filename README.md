@@ -56,5 +56,13 @@ declared paths, anonymous page classes, and an empty discovery result. Adding,
 removing, or changing page declarations during development causes a full reload;
 this is necessary because browser custom elements cannot be unregistered safely.
 
+`vite build --watch` is supported separately. The plugin watches the source tree
+for files that are not yet part of Vite's module graph and touches an internal file
+in Vite's cache directory to request a Rollup rebuild. Every watch build rescans the
+source tree and regenerates the virtual page module. This covers creating and
+deleting pages, as well as correcting a new page that initially failed validation.
+The watcher is closed when the Rollup watch session ends. This mechanism is not
+installed for ordinary production builds or the Vite dev server.
+
 Pages are eager static imports. Their lazy JoltUI dependencies remain separate Vite
 chunks and continue to load on demand.
