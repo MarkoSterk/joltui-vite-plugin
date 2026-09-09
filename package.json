@@ -1,0 +1,38 @@
+{
+  "name": "joltui-vite-plugin",
+  "version": "1.0.0",
+  "description": "Vite integration for automatic JoltUI page discovery",
+  "license": "MIT",
+  "author": "Marko Šterk",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run clean && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "tinyglobby": "^0.2.17",
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "rimraf": "^6.1.3",
+    "vite": "^8.2.2"
+  },
+  "peerDependencies": {
+    "vite": ">=6.0.0"
+  }
+}
