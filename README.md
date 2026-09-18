@@ -52,7 +52,8 @@ joltui({
 
 Named `@page` exports are build errors rather than being silently ignored. The plugin
 also rejects missing `@component`, multiple pages in one file, duplicate statically
-declared paths, anonymous page classes, and an empty discovery result. Adding,
+declared paths, duplicate statically declared component `tagName` values, anonymous
+page classes, and an empty discovery result. Adding,
 removing, or changing page declarations during development causes a full reload;
 this is necessary because browser custom elements cannot be unregistered safely.
 

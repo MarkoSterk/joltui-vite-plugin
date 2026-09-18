@@ -27,6 +27,17 @@ type PageInfo = {
     routePath: string | null;
 };
 
+type ComponentInfo = {
+    file: string;
+    className: string;
+    tagName: string;
+};
+
+type FileInfo = {
+    page: PageInfo | null;
+    components: ComponentInfo[];
+};
+
 class PageDiscoveryError extends Error {
     constructor(file: string, message: string) {
         super(`JoltUI page discovery failed in '${normalizePath(file)}':\n${message}`);
@@ -77,7 +88,24 @@ function getStaticRoutePath(decorator: ts.Decorator): string | null {
     return null;
 }
 
-async function inspectFile(file: string, frameworkPackage: string): Promise<PageInfo | null> {
+function getStaticTagName(decorator: ts.Decorator): string | null {
+    if (!ts.isCallExpression(decorator.expression)) return null;
+    const argument = decorator.expression.arguments[0];
+    if (!argument || !ts.isObjectLiteralExpression(argument)) return null;
+
+    for (const property of argument.properties) {
+        if (!ts.isPropertyAssignment(property)) continue;
+        const name = property.name;
+        if (
+            (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) &&
+            name.text === "tagName" &&
+            ts.isStringLiteralLike(property.initializer)
+        ) return property.initializer.text;
+    }
+    return null;
+}
+
+async function inspectFile(file: string, frameworkPackage: string): Promise<FileInfo> {
     const source = ts.createSourceFile(
         file,
         await readFile(file, "utf8"),
@@ -108,9 +136,23 @@ async function inspectFile(file: string, frameworkPackage: string): Promise<Page
     }
 
     const pages: PageInfo[] = [];
+    const components: ComponentInfo[] = [];
     for (const statement of source.statements) {
         if (!ts.isClassDeclaration(statement) || !ts.canHaveDecorators(statement)) continue;
         const decorators = ts.getDecorators(statement) ?? [];
+        const componentDecorator = decorators.find(
+            decorator => getDecoratorKind(decorator, imports, namespaces) === "component",
+        );
+        if (componentDecorator) {
+            const tagName = getStaticTagName(componentDecorator);
+            if (tagName !== null) {
+                components.push({
+                    file: path.resolve(file),
+                    className: statement.name?.text ?? "<anonymous>",
+                    tagName,
+                });
+            }
+        }
         const pageDecorator = decorators.find(
             decorator => getDecoratorKind(decorator, imports, namespaces) === "page",
         );
@@ -129,9 +171,7 @@ async function inspectFile(file: string, frameworkPackage: string): Promise<Page
                 "Automatically discovered pages must use 'export default class'.",
             );
         }
-        if (!decorators.some(
-            decorator => getDecoratorKind(decorator, imports, namespaces) === "component",
-        )) {
+        if (!componentDecorator) {
             throw new PageDiscoveryError(
                 file,
                 `Default page class '${statement.name.text}' must also use @component.`,
@@ -147,7 +187,7 @@ async function inspectFile(file: string, frameworkPackage: string): Promise<Page
     if (pages.length > 1) {
         throw new PageDiscoveryError(file, "A module may contain at most one @page class.");
     }
-    return pages[0] ?? null;
+    return { page: pages[0] ?? null, components };
 }
 
 function createVirtualModule(pages: readonly PageInfo[], frameworkPackage: string): string {
@@ -203,9 +243,27 @@ export default function joltui(options: JoltUiPluginOptions = {}): Plugin {
                 ])],
             },
         );
-        const found = (await Promise.all(
+        const inspected = await Promise.all(
             files.sort().map(file => inspectFile(file, frameworkPackage)),
-        )).filter((page): page is PageInfo => page !== null);
+        );
+        const found = inspected
+            .map(file => file.page)
+            .filter((page): page is PageInfo => page !== null);
+
+        const tagNames = new Map<string, ComponentInfo>();
+        for (const component of inspected.flatMap(file => file.components)) {
+            const normalizedTagName = component.tagName.toLowerCase();
+            const previous = tagNames.get(normalizedTagName);
+            if (previous) {
+                throw new PageDiscoveryError(
+                    component.file,
+                    `Duplicate component tagName '${component.tagName}' on class ` +
+                    `'${component.className}' is also declared by class ` +
+                    `'${previous.className}' in '${normalizePath(previous.file)}'.`,
+                );
+            }
+            tagNames.set(normalizedTagName, component);
+        }
 
         const paths = new Map<string, PageInfo>();
         for (const page of found) {

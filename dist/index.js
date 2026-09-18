@@ -50,6 +50,23 @@ function getStaticRoutePath(decorator) {
     }
     return null;
 }
+function getStaticTagName(decorator) {
+    if (!ts.isCallExpression(decorator.expression))
+        return null;
+    const argument = decorator.expression.arguments[0];
+    if (!argument || !ts.isObjectLiteralExpression(argument))
+        return null;
+    for (const property of argument.properties) {
+        if (!ts.isPropertyAssignment(property))
+            continue;
+        const name = property.name;
+        if ((ts.isIdentifier(name) || ts.isStringLiteralLike(name)) &&
+            name.text === "tagName" &&
+            ts.isStringLiteralLike(property.initializer))
+            return property.initializer.text;
+    }
+    return null;
+}
 async function inspectFile(file, frameworkPackage) {
     const source = ts.createSourceFile(file, await readFile(file, "utf8"), ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const imports = new Map();
@@ -73,10 +90,22 @@ async function inspectFile(file, frameworkPackage) {
         }
     }
     const pages = [];
+    const components = [];
     for (const statement of source.statements) {
         if (!ts.isClassDeclaration(statement) || !ts.canHaveDecorators(statement))
             continue;
         const decorators = ts.getDecorators(statement) ?? [];
+        const componentDecorator = decorators.find(decorator => getDecoratorKind(decorator, imports, namespaces) === "component");
+        if (componentDecorator) {
+            const tagName = getStaticTagName(componentDecorator);
+            if (tagName !== null) {
+                components.push({
+                    file: path.resolve(file),
+                    className: statement.name?.text ?? "<anonymous>",
+                    tagName,
+                });
+            }
+        }
         const pageDecorator = decorators.find(decorator => getDecoratorKind(decorator, imports, namespaces) === "page");
         if (!pageDecorator)
             continue;
@@ -88,7 +117,7 @@ async function inspectFile(file, frameworkPackage) {
             throw new PageDiscoveryError(file, `Page class '${statement.name.text}' uses @page but is not the module's default export.\n` +
                 "Automatically discovered pages must use 'export default class'.");
         }
-        if (!decorators.some(decorator => getDecoratorKind(decorator, imports, namespaces) === "component")) {
+        if (!componentDecorator) {
             throw new PageDiscoveryError(file, `Default page class '${statement.name.text}' must also use @component.`);
         }
         pages.push({
@@ -100,7 +129,7 @@ async function inspectFile(file, frameworkPackage) {
     if (pages.length > 1) {
         throw new PageDiscoveryError(file, "A module may contain at most one @page class.");
     }
-    return pages[0] ?? null;
+    return { page: pages[0] ?? null, components };
 }
 function createVirtualModule(pages, frameworkPackage) {
     const pageImports = pages.map((page, index) => `import Page${index} from ${JSON.stringify(`/@fs/${normalizePath(page.file)}`)};`);
@@ -147,7 +176,21 @@ export default function joltui(options = {}) {
                     "**/node_modules/**", "**/dist/**",
                 ])],
         });
-        const found = (await Promise.all(files.sort().map(file => inspectFile(file, frameworkPackage)))).filter((page) => page !== null);
+        const inspected = await Promise.all(files.sort().map(file => inspectFile(file, frameworkPackage)));
+        const found = inspected
+            .map(file => file.page)
+            .filter((page) => page !== null);
+        const tagNames = new Map();
+        for (const component of inspected.flatMap(file => file.components)) {
+            const normalizedTagName = component.tagName.toLowerCase();
+            const previous = tagNames.get(normalizedTagName);
+            if (previous) {
+                throw new PageDiscoveryError(component.file, `Duplicate component tagName '${component.tagName}' on class ` +
+                    `'${component.className}' is also declared by class ` +
+                    `'${previous.className}' in '${normalizePath(previous.file)}'.`);
+            }
+            tagNames.set(normalizedTagName, component);
+        }
         const paths = new Map();
         for (const page of found) {
             if (page.routePath === null)

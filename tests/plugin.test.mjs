@@ -75,6 +75,35 @@ test("rejects an @page class that is not the default export", async () => {
     );
 });
 
+test("rejects duplicate component tagNames before emitting a build", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "joltui-plugin-duplicate-component-"));
+    await cp(path.join(here, "fixtures", "valid"), root, { recursive: true });
+    const outDir = path.join(root, "dist");
+    await writeFile(
+        path.join(root, "src", "duplicate.ts"),
+        `import * as JoltUI from "joltui";\n` +
+        `@JoltUI.component({ tagName: "home-page" })\n` +
+        `export class DuplicateComponent extends JoltUI.CustomElement {}\n`,
+    );
+
+    await assert.rejects(
+        build({
+            root,
+            logLevel: "silent",
+            plugins: [joltui()],
+            resolve: { alias: { joltui: path.join(root, "src", "joltui.ts") } },
+            build: {
+                outDir,
+                emptyOutDir: true,
+                lib: { entry: path.join(root, "src", "main.ts"), formats: ["es"] },
+            },
+        }),
+        /Duplicate component tagName 'home-page'.*HomePage.*DuplicateComponent/s,
+    );
+
+    await assert.rejects(readdir(outDir), { code: "ENOENT" });
+});
+
 test("build --watch rebuilds when a previously unimported page file is created", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "joltui-plugin-watch-"));
     await cp(path.join(here, "fixtures", "valid"), root, { recursive: true });
