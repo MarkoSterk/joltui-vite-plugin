@@ -1,6 +1,13 @@
 {
-  "name": "joltui-vite-plugin",
-  "version": "1.0.0",
+  "name": "@pro/joltui-vite-plugin",
+  "publishConfig": {
+    "registry": "https://gitea.izum.pri/api/packages/pro/npm/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://gitea.izum.pri/pro/joltui-vite-plugin.git"
+  },
+  "version": "0.9.0",
   "description": "Vite integration for automatic JoltUI page discovery",
   "license": "MIT",
   "author": "Marko Šterk",
@@ -21,7 +28,8 @@
     "clean": "rimraf dist",
     "build": "npm run clean && tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs"
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "tinyglobby": "^0.2.17",
