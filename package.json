@@ -29,7 +29,9 @@
     "build": "npm run clean && tsc",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "postpublish": "node scripts/publish-npm.mjs",
+    "publish:npm": "node scripts/publish-npm.mjs"
   },
   "dependencies": {
     "tinyglobby": "^0.2.17",

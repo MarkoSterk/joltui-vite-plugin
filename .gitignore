@@ -1,3 +1,6 @@
 node_modules/
 node_modules
 .agents/
+.env
+*.tgz
+.cli-smoke*/
