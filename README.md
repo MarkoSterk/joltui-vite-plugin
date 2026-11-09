@@ -13,7 +13,17 @@ import { component, CustomElement, page } from "joltui";
 export default class HomePage extends CustomElement {}
 ```
 
-Install and configure the plugin:
+To install from the public npm registry (npmjs.com):
+
+```sh
+npm install --save-dev joltui-vite-plugin@npm:jolt-ui-vite-plugin
+```
+
+The plugin is published on npm as `jolt-ui-vite-plugin`. The alias installs it under the
+name `joltui-vite-plugin`, which the imports below use. JoltUI itself installs the same way:
+`npm install joltui@npm:jolt-ui`.
+
+Configure the plugin:
 
 ```ts
 // vite.config.ts
